@@ -171,115 +171,114 @@ def process_chapter(chapter_title, download_page_url, album_title):
     dismiss_age()
     dl_tid = page.tab_id
 
-    round_i = 0
+    # ① triggerpop + 关广告（只做一次，OCR不刷新）
+    print(f'        [1/4] 点击triggerpop...')
+    js_click('a.triggerpop')
+    time.sleep(1)
+    print(f'        [2/4] 标签 {page.tabs_count}个，清理非下载页...')
+    for tid in list(page.tab_ids):
+        if tid != dl_tid:
+            try: page.close_tabs(tid)
+            except: pass
+    page.activate_tab(dl_tid)
+
     ocr_fail_count = 0
     while True:
-        round_i += 1
-        print(f'      · 第{round_i}轮')
-
-        # ① triggerpop
-        print(f'        [1/4] 点击triggerpop...')
-        js_click('a.triggerpop')
-        time.sleep(1)
-
-        # ② 关广告
-        print(f'        [2/4] 标签 {page.tabs_count}个，清理非下载页...')
-        ad_count = 0
-        for tid in list(page.tab_ids):
-            if tid != dl_tid:
-                try: page.close_tabs(tid); ad_count += 1
-                except: pass
-        page.activate_tab(dl_tid)
-        print(f'        → 关闭 {ad_count}个广告标签')
-
-        # ③ OCR
-        print(f'        [3/4] 获取验证码...')
+        # ③ OCR（验证码还在，不重新triggerpop）
+        print(f'        [3/4] 获取验证码（连续失败{ocr_fail_count}次）...')
         captcha_img = None
         try:
             captcha_img = page.ele('xpath://img[contains(@src,"captcha")]', timeout=1)
         except: pass
 
-        if captcha_img:
-            print(f'        → 找到验证码元素，开始OCR...')
-        else:
-            print(f'        → ⚠ 未找到验证码元素')
-            ocr_fail_count += 1
-            if ocr_fail_count >= 5:
-                print(f'        → 连续{ocr_fail_count}次失败 → refresh')
-                page.refresh(); time.sleep(2); dismiss_age()
-                ocr_fail_count = 0
+        if not captcha_img:
+            print(f'        → ⚠ 无验证码元素，refresh')
+            page.refresh(); time.sleep(2); dismiss_age()
+            js_click('a.triggerpop'); time.sleep(1)
+            for tid in list(page.tab_ids):
+                if tid != dl_tid:
+                    try: page.close_tabs(tid)
+                    except: pass
+            page.activate_tab(dl_tid)
+            ocr_fail_count = 0
             continue
 
         captcha_ans = _ocr_captcha(captcha_img)
 
-        if captcha_ans:
-            print(f'        → ✅ OCR识别: {captcha_ans}')
-            ocr_fail_count = 0
-        else:
+        if not captcha_ans:
             ocr_fail_count += 1
-            print(f'        → ⚠ OCR识别失败（连续{ocr_fail_count}次）')
-            if ocr_fail_count >= 3:
-                print(f'        → 连续3次失败 → refresh')
+            if ocr_fail_count >= 10:
+                print(f'        → ⚠ OCR连续10次失败，可能验证码过期，refresh')
                 page.refresh(); time.sleep(2); dismiss_age()
+                js_click('a.triggerpop'); time.sleep(1)
+                for tid in list(page.tab_ids):
+                    if tid != dl_tid:
+                        try: page.close_tabs(tid)
+                        except: pass
+                page.activate_tab(dl_tid)
                 ocr_fail_count = 0
             continue
 
-        # ④ 填验证码 + 提交
-        print(f'        [4/4] 提交...')
-        print(f'        → 查找输入框...')
+        # ④ 填验证码
+        print(f'        [4/4] 提交...  答案: {captcha_ans}')
         el = page.ele('#invite_verification')
-        if el:
-            el.input(str(captcha_ans), clear=True)
-            print(f'        → ✅ 已填入 {captcha_ans}')
-        else:
-            print(f'        → ⚠ 未找到输入框，用JS填入')
-            page.run_js(f'document.getElementById("invite_verification").value="{captcha_ans}"')
+        if el: el.input(str(captcha_ans), clear=True)
+        else: page.run_js(f'document.getElementById("invite_verification").value="{captcha_ans}"')
 
         page.set.download_path(full_path)
         page.set.when_download_file_exists('overwrite')
+        before = set(os.listdir(full_path))
 
         page.run_js('document.getElementById("download_submit")?.click()')
-        print(f'        → ✅ 已点击提交')
+        print(f'        → ✅ 提交')
 
-        # ⑤ 用 download_begin 判定验证码是否正确 + 获取下载任务
+        # ⑤ download_begin? → 验证码正确 → 等下载完成
         try:
-            print(f'        → 等待 download_begin（5s超时）...')
-            mission = page.wait.download_begin(timeout=5)
-            print(f'        📥 download_begin 触发 → 验证码正确！等待下载完成...')
+            page.wait.download_begin(timeout=5)
+            print(f'        📥 download_begin → 验证码正确')
+            page.wait.all_downloads_done(timeout=60)
+            print(f'        ✅ 所有下载完成')
         except:
-            print(f'        → ⏭ 无 download_begin → 验证码错误')
+            print(f'        → ⏭ 下载失败')
             page.refresh(); time.sleep(2); dismiss_age()
+            js_click('a.triggerpop'); time.sleep(1)
+            for tid in list(page.tab_ids):
+                if tid != dl_tid:
+                    try: page.close_tabs(tid)
+                    except: pass
+            page.activate_tab(dl_tid)
             continue
 
-        # ⑥ 等下载完成，直接用 mission.path 拿文件
-        try:
-            mission.wait()
-            src_path = mission.path
-            print(f'        ✅ 下载完成: {src_path}')
-            if src_path and os.path.exists(src_path):
-                # 重命名为目标文件名
-                if os.path.basename(src_path) != file_name:
-                    try:
-                        # 先删除同名的目标文件（如果有）
-                        if os.path.exists(target_path):
-                            os.remove(target_path)
-                        os.rename(src_path, target_path)
-                    except:
-                        # 跨盘符或权限问题，用 shutil
-                        try:
-                            import shutil
-                            shutil.move(src_path, target_path)
-                        except:
-                            target_path = src_path
-                else:
-                    target_path = src_path
-                print(f'      ✅ {file_name}')
-                return target_path
-        except Exception as e:
-            print(f'        → 下载异常: {e}')
+        # 找出最新的 zip 文件（刚下载的）
+        newest = None
+        for fname in os.listdir(full_path):
+            if fname.endswith('.crdownload'): continue
+            fp = os.path.join(full_path, fname)
+            if fname.endswith('.zip') and _zip_intact(fp):
+                mtime = os.path.getmtime(fp)
+                if newest is None or mtime > newest[1]:
+                    newest = (fp, mtime)
 
-        print(f'      ✅ {file_name}')
-        return target_path
+        if newest:
+            src_path = newest[0]
+            if os.path.basename(src_path) != file_name:
+                if os.path.exists(target_path):
+                    os.remove(target_path)
+                try: os.rename(src_path, target_path)
+                except:
+                    import shutil
+                    shutil.move(src_path, target_path)
+            print(f'      ✅ {file_name}')
+            return target_path
+
+        print(f'        → 文件未找到，刷新重试')
+        page.refresh(); time.sleep(2); dismiss_age()
+        js_click('a.triggerpop'); time.sleep(1)
+        for tid in list(page.tab_ids):
+            if tid != dl_tid:
+                try: page.close_tabs(tid)
+                except: pass
+        page.activate_tab(dl_tid)
 
 
 def _ocr_captcha(captcha_img_el):
