@@ -238,53 +238,45 @@ def process_chapter(chapter_title, download_page_url, album_title):
         page.set.download_path(full_path)
         page.set.when_download_file_exists('overwrite')
 
-        before = set(os.listdir(full_path))
-
         page.run_js('document.getElementById("download_submit")?.click()')
         print(f'        → ✅ 已点击提交')
 
-        # ⑤ 用 download_begin 判定验证码是否正确
+        # ⑤ 用 download_begin 判定验证码是否正确 + 获取下载任务
         try:
             print(f'        → 等待 download_begin（5s超时）...')
-            page.wait.download_begin(timeout=5)
+            mission = page.wait.download_begin(timeout=5)
             print(f'        📥 download_begin 触发 → 验证码正确！等待下载完成...')
         except:
             print(f'        → ⏭ 无 download_begin → 验证码错误')
             page.refresh(); time.sleep(2); dismiss_age()
             continue
 
-        # ⑥ 等下载完成
+        # ⑥ 等下载完成，直接用 mission.path 拿文件
         try:
-            page.wait.all_downloads_done(timeout=30)
-            print(f'        ✅ 下载完成')
-        except:
-            print(f'        → 下载超时')
-            page.refresh(); time.sleep(2); dismiss_age()
-            continue
-
-        # ⑦ 找 ZIP 文件
-        after = set(os.listdir(full_path))
-        for fname in after - before:
-            fp = os.path.join(full_path, fname)
-            if fname.endswith('.zip') and _zip_intact(fp):
-                try:
-                    if fname != file_name:
-                        os.rename(fp, target_path)
-                    else:
-                        target_path = fp
-                except: pass
+            mission.wait()
+            src_path = mission.path
+            print(f'        ✅ 下载完成: {src_path}')
+            if src_path and os.path.exists(src_path):
+                # 重命名为目标文件名
+                if os.path.basename(src_path) != file_name:
+                    try:
+                        # 先删除同名的目标文件（如果有）
+                        if os.path.exists(target_path):
+                            os.remove(target_path)
+                        os.rename(src_path, target_path)
+                    except:
+                        # 跨盘符或权限问题，用 shutil
+                        try:
+                            import shutil
+                            shutil.move(src_path, target_path)
+                        except:
+                            target_path = src_path
+                else:
+                    target_path = src_path
                 print(f'      ✅ {file_name}')
                 return target_path
-            if '.' not in fname and os.path.getsize(fp) > 512 * 1024:
-                test = fp + '.zip'
-                try:
-                    os.rename(fp, test)
-                    if _zip_intact(test):
-                        os.rename(test, target_path)
-                        print(f'      ✅ {file_name}')
-                        return target_path
-                    os.rename(test, fp)
-                except: pass
+        except Exception as e:
+            print(f'        → 下载异常: {e}')
 
         print(f'      ✅ {file_name}')
         return target_path
@@ -292,18 +284,17 @@ def process_chapter(chapter_title, download_page_url, album_title):
 
 def _ocr_captcha(captcha_img_el):
     """
-    验证码识别：JS canvas 截图（无质量损失）→ OpenCV 分割 → 单字符OCR
-    返回 a+b 的答案字符串
+    验证码识别：JS canvas 截图 → 多策略 Tesseract → 正则提取 a+b
     """
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps, ImageFilter
         import pytesseract
         import re, io, base64
 
         tess_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
         if os.path.exists(tess_cmd): pytesseract.pytesseract.tesseract_cmd = tess_cmd
 
-        # —— ① JS canvas 截图（不依赖元素 get_screenshot，无质量损失） ——
+        # —— ① JS canvas 截图 ——
         b64 = page.run_js('''
             var c = document.createElement("canvas");
             var img = document.querySelector("img[src*='captcha']");
@@ -315,117 +306,81 @@ def _ocr_captcha(captcha_img_el):
             return c.toDataURL("image/png").split(",")[1];
         ''')
         if not b64:
-            # 降级：DP 元素截图
             captcha_img_el.get_screenshot('captcha_image.png')
             orig = Image.open('captcha_image.png')
         else:
             raw = base64.b64decode(b64)
             orig = Image.open(io.BytesIO(raw))
-            orig.save('captcha_origin.png')
 
-        w, h = orig.size
-        # 小图直接放大
-        if w < 100:
-            orig = orig.resize((w * 3, h * 3), Image.LANCZOS)
-        # 确保 RGB（JS canvas 可能输出 RGBA）
-        if orig.mode == 'RGBA':
-            orig = orig.convert('RGB')
+        # 统一灰度
+        gray = orig.convert('L')
 
-        # —— ② OpenCV 二值化 + 轮廓分割 ——
-        try:
-            import cv2
-            import numpy as np
+        # 尝试多阈值组合
+        recipes = []
 
-            img_cv = np.array(orig.convert('L'))
-            _, th = cv2.threshold(img_cv, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            cv2.imwrite('captcha_th.png', th)
+        # 反色 + 二值化（白字黑底）
+        inv = ImageOps.invert(gray)
+        for thr in (50, 80, 100, 120, 140):
+            img = inv.point(lambda x: 0 if x < (255 - thr) else 255)
+            recipes.append((f'inv{thr}', img))
 
-            cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # 灰度低阈值（深色前景）
+        for thr in (30, 50, 80, 100, 120):
+            img = gray.point(lambda x: 255 if x < thr else 0)
+            recipes.append((f'gray{thr}', img))
 
-            boxes = []
-            for c in cnts:
-                x, y, w2, h2 = cv2.boundingRect(c)
-                if w2 < 5 or h2 < 8: continue
-                boxes.append((x, y, w2, h2))
+        # 纯黑检测
+        if orig.mode == 'RGB':
+            binary = Image.new('L', (orig.width, orig.height))
+            for y in range(orig.height):
+                for x in range(orig.width):
+                    rv, gv, bv = orig.getpixel((x, y))
+                    binary.putpixel((x, y), 255 if rv + gv + bv < 50 else 0)
+            recipes.append(('rgb', binary))
 
-            if len(boxes) >= 3:
-                boxes.sort(key=lambda b: b[0])
-                chars = []
-                for bx, by, bw, bh in boxes:
-                    roi = th[by:by+bh, bx:bx+bw]
-                    margin = 4
-                    roi_padded = cv2.copyMakeBorder(roi, margin, margin, margin, margin,
-                                                     cv2.BORDER_CONSTANT, value=0)
-                    roi_padded = cv2.resize(roi_padded, None, fx=5, fy=5,
-                                            interpolation=cv2.INTER_LANCZOS4)
-                    ch = pytesseract.image_to_string(roi_padded,
-                        config='--psm 10 -c tessedit_char_whitelist=0123456789+').strip()
-                    if ch:
-                        chars.append(ch)
+        # 先用中值滤波去噪再处理
+        denoised = gray.filter(ImageFilter.MedianFilter(3))
+        for thr in (80, 100, 120):
+            img = ImageOps.invert(denoised).point(lambda x: 0 if x < (255 - thr) else 255)
+            recipes.append((f'denoised{thr}', img))
 
-                if len(chars) >= 3:
-                    text = ''.join(chars).replace('+', '+')
-                    nums = re.findall(r'\d+', text)
-                    if len(nums) >= 2:
-                        a, b = int(nums[-2]), int(nums[-1])
-                        if a < 100 and b < 100:
-                            print(f'    ✅ OCR[分割]: {a}+{b}={a+b}')
-                            return str(a + b)
-
-                # 分割后直接用整图Tesseract
-                text = pytesseract.image_to_string(th, config='--psm 8 -c tessedit_char_whitelist=0123456789+=').strip()
-                nums = re.findall(r'\d+', text.replace(' ', ''))
+        # 放大后 OCR（统一5倍）
+        def ocr_img(img):
+            img = img.resize((img.width * 5, img.height * 5), Image.LANCZOS)
+            for cfg in [
+                '--psm 7 -c tessedit_char_whitelist=0123456789+=',
+                '--psm 8 -c tessedit_char_whitelist=0123456789+=',
+                '--psm 6 -c tessedit_char_whitelist=0123456789+=',
+            ]:
+                text = pytesseract.image_to_string(img, config=cfg).strip()
+                text = text.replace(' ', '').replace('\n', '').replace('\x0c', '')
+                # 直接匹配加法表达式 a+b
+                m = re.search(r'(\d{1,2})\s*\+\s*(\d{1,2})', text)
+                if m:
+                    a, b = int(m.group(1)), int(m.group(2))
+                    return a, b
+                # 兜底：找两个数字
+                nums = re.findall(r'\d+', text)
                 if len(nums) >= 2:
                     a, b = int(nums[-2]), int(nums[-1])
                     if a < 100 and b < 100:
-                        print(f'    ✅ OCR[OTSU]: {a}+{b}={a+b}')
-                        return str(a + b)
+                        return a, b
+            return None, None
 
-        except ImportError:
-            pass
+        for name, v in recipes:
+            a, b = ocr_img(v)
+            if a is not None:
+                print(f'    ✅ OCR[{name}]: {a}+{b}={a+b}')
+                return str(a + b)
 
-        # —— ③ 没有 cv2 时的兜底 ——
-        from PIL import ImageOps, ImageFilter
-        gray = orig.convert('L')
-
-        # v1: 反色二值化
-        inv = ImageOps.invert(gray)
-        for thr in (50, 80, 100, 120):
-            img = inv.point(lambda x: 0 if x < (255 - thr) else 255)
-            img = img.resize((w * 6, h * 6), Image.LANCZOS)
-            text = pytesseract.image_to_string(img, config='--psm 8 -c tessedit_char_whitelist=0123456789+=').strip()
+        # 最终兜底：放大后宽松模式
+        for name, v in recipes:
+            img = v.resize((v.width * 5, v.height * 5), Image.LANCZOS)
+            text = pytesseract.image_to_string(img, config='--psm 7').strip()
             nums = re.findall(r'\d+', text.replace(' ', ''))
             if len(nums) >= 2:
                 a, b = int(nums[-2]), int(nums[-1])
-                if a < 100 and b < 100:
-                    print(f'    ✅ OCR[inv{thr}]: {a}+{b}={a+b}')
-                    return str(a + b)
-
-        # v2: 灰度低阈值
-        for thr in (30, 50, 80):
-            img = gray.point(lambda x: 255 if x < thr else 0)
-            img = img.resize((w * 6, h * 6), Image.LANCZOS)
-            text = pytesseract.image_to_string(img, config='--psm 8 -c tessedit_char_whitelist=0123456789+=').strip()
-            nums = re.findall(r'\d+', text.replace(' ', ''))
-            if len(nums) >= 2:
-                a, b = int(nums[-2]), int(nums[-1])
-                if a < 100 and b < 100:
-                    print(f'    ✅ OCR[gray{thr}]: {a}+{b}={a+b}')
-                    return str(a + b)
-
-        # v3: 纯黑检测
-        binary = Image.new('L', (w, h))
-        for y in range(h):
-            for x in range(w):
-                rv, gv, bv = orig.getpixel((x, y))
-                binary.putpixel((x, y), 255 if rv + gv + bv < 50 else 0)
-        binary = binary.resize((w * 6, h * 6), Image.LANCZOS)
-        text = pytesseract.image_to_string(binary, config='--psm 8 -c tessedit_char_whitelist=0123456789+=').strip()
-        nums = re.findall(r'\d+', text.replace(' ', ''))
-        if len(nums) >= 2:
-            a, b = int(nums[-2]), int(nums[-1])
-            if a < 100 and b < 100:
-                print(f'    ✅ OCR[纯黑]: {a}+{b}={a+b}')
+                print(f'    ✅ OCR宽松[{name}]: {a}+{b}={a+b}')
                 return str(a + b)
 
         return None
@@ -453,6 +408,13 @@ def main(name=None, save_dir=None):
         print('✅ 连接成功')
 
     state = load_state()
+    # 启动时校验：done 但文件不存在的 → 改回 pending 重新下载
+    for k, v in state.items():
+        if v.get('status') == 'done':
+            sp = v.get('save_path', '')
+            if not sp or not os.path.exists(sp):
+                v['status'] = 'pending'
+                v['error'] = '文件不存在，重新下载'
     done_cnt = sum(1 for v in state.values() if v.get('status') == 'done')
     print(f'\n已下载: {len(state)} 条（其中 done {done_cnt} 条）')
 
