@@ -1,0 +1,114 @@
+### AI掘金头条 收藏 & 浏览历史 API
+### 前提：uvicorn main:app --reload，已登录并获取 Token
+
+@baseUrl = http://127.0.0.1:8000
+@authToken = <token>
+
+
+# ══════════════════════════════════════════
+#              收藏模块 /api/favorite
+# ══════════════════════════════════════════
+
+# ═══ 检查收藏状态 ═══════════
+
+### GET /api/favorite/check?newsId=1 — 检查是否已收藏
+GET {{baseUrl}}/api/favorite/check?newsId=1
+Authorization: Bearer {{authToken}}
+
+### GET /api/favorite/check?newsId=1 — 未登录
+GET {{baseUrl}}/api/favorite/check?newsId=1
+# 200: {"is_favorite": false}
+
+
+# ═══ 添加收藏 ═══════════
+
+### POST /api/favorite/add — 收藏新闻
+POST {{baseUrl}}/api/favorite/add
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "newsId": 1
+}
+
+### POST /api/favorite/add — 重复收藏 → 400
+POST {{baseUrl}}/api/favorite/add
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "newsId": 1
+}
+
+###  取消收藏
+
+### DELETE /api/favorite/remove?newsId=1 — 取消收藏
+DELETE {{baseUrl}}/api/favorite/remove?newsId=1
+Authorization: Bearer {{authToken}}
+
+### DELETE /api/favorite/remove?newsId=999 — 未收藏 → 404
+DELETE {{baseUrl}}/api/favorite/remove?newsId=999
+Authorization: Bearer {{authToken}}
+
+
+# ═══ 收藏列表（联表查询 Favorite JOIN News）═
+
+### GET /api/favorite/list — 第1页
+GET {{baseUrl}}/api/favorite/list?page=1&pageSize=10
+Authorization: Bearer {{authToken}}
+
+
+# ═══ 清空收藏 ═══════════
+
+### DELETE /api/favorite/clear — 清空当前用户全部收藏
+DELETE {{baseUrl}}/api/favorite/clear
+Authorization: Bearer {{authToken}}
+
+
+# ══════════════════════════════════════════
+#            浏览历史模块 /api/history
+# ══════════════════════════════════════════
+
+# ═══ 添加浏览记录 ═══════
+
+### POST /api/history/add — 添加浏览记录
+POST {{baseUrl}}/api/history/add
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "newsId": 1
+}
+
+### POST /api/history/add — 重复浏览 → 更新浏览时间
+POST {{baseUrl}}/api/history/add
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "newsId": 1
+}
+
+### 浏览历史列表（History JOIN News）
+
+### GET /api/history/list — 第1页
+GET {{baseUrl}}/api/history/list?page=1&pageSize=10
+Authorization: Bearer {{authToken}}
+
+
+# ═══ 删除单条浏览记录 ═══
+
+### DELETE /api/history/delete/1 — 删除指定历史
+DELETE {{baseUrl}}/api/history/delete/1
+Authorization: Bearer {{authToken}}
+
+### DELETE /api/history/delete/999 — 不存在 → 404
+DELETE {{baseUrl}}/api/history/delete/999
+Authorization: Bearer {{authToken}}
+
+
+# ═══ 清空浏览历史 ═══════
+
+### DELETE /api/history/clear — 清空当前用户全部历史
+DELETE {{baseUrl}}/api/history/clear
+Authorization: Bearer {{authToken}}

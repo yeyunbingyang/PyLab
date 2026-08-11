@@ -1,0 +1,62 @@
+### AI掘金头条 新闻模块 API
+### 前提：MySQL + Redis 已启动，uvicorn main:app --reload
+
+@baseUrl = http://127.0.0.1:8000
+
+# ═══ 新闻分类 ═══════════════════════════
+
+### GET /api/news/categories — 获取所有分类（Cache-Aside，过期 7200s）
+GET {{baseUrl}}/api/news/categories
+
+### GET /api/news/categories?skip=0&limit=50
+GET {{baseUrl}}/api/news/categories?skip=0&limit=50
+
+
+# ═══ 新闻列表（分页+分类过滤）═══════════
+
+### GET /api/news/list?categoryId=1 — 缓存 Key: "news:list:1:1:10"
+GET {{baseUrl}}/api/news/list?categoryId=1
+
+### GET /api/news/list?categoryId=1&page=2&pageSize=5
+GET {{baseUrl}}/api/news/list?categoryId=1&page=2&pageSize=5
+
+### GET /api/news/list?categoryId=999 — 空列表
+GET {{baseUrl}}/api/news/list?categoryId=999
+
+### GET /api/news/list — 缺少必填 categoryId → 422
+GET {{baseUrl}}/api/news/list
+
+
+# ═══ 新闻详情（浏览量+1 + 相关新闻5条）══
+
+### GET /api/news/detail?id=1 — 正常查询
+GET {{baseUrl}}/api/news/detail?id=1
+
+### GET /api/news/detail?id=999 — 不存在 → 404
+GET {{baseUrl}}/api/news/detail?id=999
+
+### GET /api/news/detail — 缺少 id → 422
+GET {{baseUrl}}/api/news/detail
+
+
+# ═══ 新增新闻 ═══════════════════════════
+
+### POST /api/news/create — 正常新增
+POST {{baseUrl}}/api/news/create
+Content-Type: application/json
+
+{
+  "title": "FastAPI 3.0 发布",
+  "content": "FastAPI 3.0 带来了诸多新特性...",
+  "description": "FastAPI 最新版本发布",
+  "author": "官方团队",
+  "category_id": 1
+}
+
+### POST /api/news/create — 缺少 content → 422
+POST {{baseUrl}}/api/news/create
+Content-Type: application/json
+
+{
+  "title": "只有标题没有正文"
+}

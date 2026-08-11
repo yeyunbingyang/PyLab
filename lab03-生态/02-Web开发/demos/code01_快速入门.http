@@ -1,0 +1,47 @@
+### code01 快速入门 — 同步/异步 + 请求体（笔记 [[01 FastAPI入门]]）
+### 前提：uvicorn main:app --reload
+
+@baseUrl = http://127.0.0.1:8000
+
+# ─── 根路由 ────────────────────────────
+
+### GET / — Hello World
+GET {{baseUrl}}/
+
+# ─── 同步 vs 异步 ───────────────────────
+# 笔记：[[01 FastAPI入门]] → 一、核心特性 → 同步与异步
+# 同步：请求排队处理，每个 I/O 操作阻塞后续请求
+# 异步：I/O 等待期间可处理其他请求，吞吐量更高
+
+### GET /start/sync — 同步阻塞（逐个 sleep × 10 ≈ 10s）
+GET {{baseUrl}}/start/sync
+
+### GET /start/async — 异步并发（gather × 10 ≈ 1s）
+GET {{baseUrl}}/start/async
+
+# ─── POST 请求体 ────────────────────────
+# 笔记：[[01 FastAPI入门]] → 四、参数 → 4.3 请求体参数
+# Pydantic BaseModel → 自动校验 JSON → Python 对象
+
+### POST /start/register — 正常注册
+POST {{baseUrl}}/start/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "secret123"
+}
+
+### POST /start/register — 缺必填字段 password → 422
+POST {{baseUrl}}/start/register
+Content-Type: application/json
+
+{
+  "username": "bob"
+}
+
+### POST /start/register — 空 body → 422
+POST {{baseUrl}}/start/register
+Content-Type: application/json
+
+{}

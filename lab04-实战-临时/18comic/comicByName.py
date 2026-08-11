@@ -204,23 +204,39 @@ def process_chapter(chapter_title, download_page_url, album_title, max_retries=9
     page.activate_tab(dl_tid)
 
     ocr_fail_count = 0
+    no_captcha_count = 0       # 连续无验证码计数器
+    wrong_answer_count = 0     # 连续验证码错误计数器
     chapter_retry = 0
     while chapter_retry < max_retries:
         chapter_retry += 1
         if chapter_retry > 1:
             print(f'        → 🔄 章节重试第 {chapter_retry}/{max_retries} 次')
-        # ③ OCR
-        print(f'        [3/4] 获取验证码（连续OCR失败{ocr_fail_count}次）...')
+
+        # ③ 退避逻辑
+        consecutive_fail = max(no_captcha_count, wrong_answer_count)
+        if consecutive_fail > 0:
+            delay = min(consecutive_fail * 3, 60)
+            print(f'        💤 退避 {delay}s (连续失败{consecutive_fail}次)...')
+            time.sleep(delay)
+
+        # ④ OCR
+        print(f'        [3/4] 获取验证码（连续OCR失败{ocr_fail_count}次，无验证码×{no_captcha_count}，验证码错误×{wrong_answer_count}）...')
         try:
             captcha_img = page.ele('xpath://img[contains(@src,"captcha")]', timeout=1)
         except:
             captcha_img = None
 
         if not captcha_img:
+            no_captcha_count += 1
             print(f'        → ⚠ 无验证码元素，refresh')
+            if no_captcha_count >= 3:
+                print(f'        → ⚠ 连续{no_captcha_count}次无验证码，完整重载页面')
+                page.get(download_page_url); time.sleep(3); dismiss_age()
+                dl_tid = page.tab_id
             _refresh_and_reopen(dl_tid)
-            ocr_fail_count = 0
             continue
+        else:
+            no_captcha_count = 0
 
         captcha_ans = _ocr_captcha(captcha_img)
 
@@ -232,7 +248,7 @@ def process_chapter(chapter_title, download_page_url, album_title, max_retries=9
                 ocr_fail_count = 0
             continue
 
-        # ④ 填验证码
+        # ⑤ 填验证码
         print(f'        [4/4] 提交...  答案: {captcha_ans}')
         el = page.ele('#invite_verification')
         if el: el.input(str(captcha_ans), clear=True)
@@ -244,12 +260,15 @@ def process_chapter(chapter_title, download_page_url, album_title, max_retries=9
         page.run_js('document.getElementById("download_submit")?.click()')
         print(f'        → ✅ 提交')
 
-        # ⑤ ⭐ wait.download_begin() → 返回 DownloadMission 对象
+        # ⑥ ⭐ wait.download_begin() → 返回 DownloadMission 对象
         mission = page.wait.download_begin(timeout=5)
         if not mission:
+            wrong_answer_count += 1
             print(f'        → ⏭ 无下载事件，验证码错误')
             _refresh_and_reopen(dl_tid)
             continue
+        else:
+            wrong_answer_count = 0
 
         # 验证码正确，有下载任务了
         print(f'        📥 验证码正确，等待下载完成...')
@@ -363,21 +382,36 @@ def _ocr_captcha(captcha_img_el):
                         return a, b
             return None, None
 
+        # 多阈值投票：所有recipe跑完，少数服从多数
+        votes = {}
         for name, v in recipes:
             a, b = ocr_img(v)
             if a is not None:
-                print(f'    ✅ OCR[{name}]: {a}+{b}={a+b}')
-                return str(a + b)
+                ans = str(a + b)
+                votes[ans] = votes.get(ans, 0) + 1
+                print(f'    OCR[{name}]: {a}+{b}={ans}')
 
-        # 最终兜底：放大后宽松模式
+        if votes:
+            winner = max(votes, key=votes.get)
+            print(f'    ✅ 投票结果: {winner} ({votes[winner]}/{sum(votes.values())} 票)')
+            return winner
+
+        # 最终兜底：放大后宽松模式（也多策略投票）
+        fallback_votes = {}
         for name, v in recipes:
             img = v.resize((v.width * 5, v.height * 5), Image.LANCZOS)
             text = pytesseract.image_to_string(img, config='--psm 7').strip()
             nums = re.findall(r'\d+', text.replace(' ', ''))
             if len(nums) >= 2:
                 a, b = int(nums[-2]), int(nums[-1])
-                print(f'    ✅ OCR宽松[{name}]: {a}+{b}={a+b}')
-                return str(a + b)
+                ans = str(a + b)
+                fallback_votes[ans] = fallback_votes.get(ans, 0) + 1
+                print(f'    OCR宽松[{name}]: {a}+{b}={ans}')
+
+        if fallback_votes:
+            winner = max(fallback_votes, key=fallback_votes.get)
+            print(f'    ✅ 宽松投票结果: {winner} ({fallback_votes[winner]}/{sum(fallback_votes.values())} 票)')
+            return winner
 
         return None
     except Exception as e:

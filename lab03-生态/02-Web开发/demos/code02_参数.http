@@ -1,0 +1,92 @@
+### code02 参数 — 路径参数 + 查询参数 + 请求体 Field（笔记 [[01 FastAPI入门]]）
+### 前提：uvicorn main:app --reload
+
+@baseUrl = http://127.0.0.1:8000
+
+# ─── 路径参数 GET /book/{id} ────────────
+# 笔记：[[01 FastAPI入门]] → 四、参数 → 4.1 路径参数 + Path 注解
+# Path 校验：id 必须是 int 且 >= 1
+
+### GET /book/1 — 正常值
+GET {{baseUrl}}/book/1
+
+### GET /book/42 — 任意合法 id
+GET {{baseUrl}}/book/42
+
+### GET /book/0 — id < 1，Path(ge=1) 拒绝 → 422
+GET {{baseUrl}}/book/0
+
+### GET /book/-1 — 负数，校验失败 → 422
+GET {{baseUrl}}/book/-1
+
+### GET /book/abc — 非 int，类型校验失败 → 422
+GET {{baseUrl}}/book/abc
+
+# ─── 查询参数 GET /book/?... ────────────
+# 笔记：[[01 FastAPI入门]] → 四、参数 → 4.2 查询参数 + Query 注解
+# Query 校验：category 长度 2~255，price 0~999，limit 1~100
+
+### GET /book/ — 无参，使用默认值
+GET {{baseUrl}}/book/
+
+### GET /book/?category=AI&price=50
+GET {{baseUrl}}/book/?category=AI&price=50
+
+### GET /book/?category=AI&price=50&skip=0&limit=5
+GET {{baseUrl}}/book/?category=AI&price=50&skip=0&limit=5
+
+### GET /book/?category=人工智能 — 中文 URL 编码
+GET {{baseUrl}}/book/?category=人工智能
+
+### GET /book/?price=9999 — 超出 le=999 → 422
+GET {{baseUrl}}/book/?price=9999
+
+### GET /book/?category=a — 长度 < min_length=2 → 422
+GET {{baseUrl}}/book/?category=a
+
+### GET /book/?limit=999 — limit 超出 le=100 → 422
+GET {{baseUrl}}/book/?limit=999
+
+# ─── POST 请求体 + Field 注解 ────────────
+# 笔记：[[01 FastAPI入门]] → 四、参数 → 4.3 请求体参数 → Field 注解
+# Field 校验：title 2~20 必填，price >0 必填，publisher 可选默认"黑马出版社"
+
+### POST /book/add — 正常新增
+POST {{baseUrl}}/book/add
+Content-Type: application/json
+
+{
+  "title": "红楼梦",
+  "author": "曹雪芹",
+  "publisher": "人民文学出版社",
+  "price": 88.0
+}
+
+### POST /book/add — 使用默认出版社
+POST {{baseUrl}}/book/add
+Content-Type: application/json
+
+{
+  "title": "三体",
+  "author": "刘慈欣",
+  "price": 68.0
+}
+
+### POST /book/add — 缺 title → 422
+POST {{baseUrl}}/book/add
+Content-Type: application/json
+
+{
+  "author": "只有作者",
+  "price": 50.0
+}
+
+### POST /book/add — price <= 0 → 422
+POST {{baseUrl}}/book/add
+Content-Type: application/json
+
+{
+  "title": "免费书",
+  "author": "某人",
+  "price": 0
+}

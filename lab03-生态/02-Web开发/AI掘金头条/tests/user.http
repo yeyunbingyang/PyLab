@@ -1,0 +1,118 @@
+### AI掘金头条 用户模块 API
+### 前提：uvicorn main:app --reload
+
+@baseUrl = http://127.0.0.1:8000
+
+# 保存登录后返回的 Token（手动替换下面的值）
+@authToken = <token>
+
+
+# ═══ 用户注册 ═══════════════════════════
+
+### POST /api/user/register — 正常注册
+POST {{baseUrl}}/api/user/register
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "123456"
+}
+
+### 200: {code:200, message:"注册成功", data:{token:"...", user_info:{...}}}
+
+### POST /api/user/register — 重复用户名 → 400
+POST {{baseUrl}}/api/user/register
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "654321"
+}
+
+### POST /api/user/register — 密码太短 < 6 → 422
+POST {{baseUrl}}/api/user/register
+Content-Type: application/json
+
+{
+  "username": "newuser",
+  "password": "123"
+}
+
+
+# ═══ 用户登录 ═══════════════════════════
+
+### POST /api/user/login — 正常登录
+POST {{baseUrl}}/api/user/login
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "123456"
+}
+# 200: {code:200, message:"登录成功", data:{token:"...", user_info:{...}}}
+# 复制返回的 token 到上面 @authToken 变量
+
+### POST /api/user/login — 密码错误 → 400
+POST {{baseUrl}}/api/user/login
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "wrongpw"
+}
+
+
+# ═══ 获取用户信息（需 Token）═══════════
+
+### GET /api/user/info — 获取当前用户信息
+GET {{baseUrl}}/api/user/info
+Authorization: Bearer {{authToken}}
+# 200: 返回用户详细信息
+
+### GET /api/user/info — 无 Token → 401
+GET {{baseUrl}}/api/user/info
+# 401: 请先登录
+
+
+# ═══ 修改用户信息（需 Token）═══════════
+
+### PUT /api/user/update — 修改昵称和简介
+PUT {{baseUrl}}/api/user/update
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "nickname": "测试用户",
+  "bio": "这是我的简介"
+}
+
+### PUT /api/user/update — 传入空对象
+PUT {{baseUrl}}/api/user/update
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{}
+# 200: 不变（全部可选）
+
+
+# ═══ 修改密码（需 Token）═══════════════
+
+### PUT /api/user/password — 正常修改密码
+PUT {{baseUrl}}/api/user/password
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "old_password": "123456",
+  "new_password": "654321"
+}
+
+### PUT /api/user/password — 旧密码错误 → 400
+PUT {{baseUrl}}/api/user/password
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "old_password": "wrong",
+  "new_password": "654321"
+}

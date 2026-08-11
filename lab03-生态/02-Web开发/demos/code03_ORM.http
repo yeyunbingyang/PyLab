@@ -1,0 +1,87 @@
+### code03 ORM — 数据库 CRUD（笔记 [[02 FastAPI进阶]] + [[03 ORM模板代码]]）
+### 前提：uvicorn main:app --reload（MySQL 已启动，pymysql 数据库已存在）
+
+@baseUrl = http://127.0.0.1:8000
+
+# ─── 查询所有图书 ──────────────────────
+# 笔记：[[02 FastAPI进阶]] → 四、数据库操作 → 4.1 查询
+
+### GET /orm/book/list — 查询所有
+GET {{baseUrl}}/orm/book/list
+
+# ─── 按 id 查询 ────────────────────────
+
+### GET /orm/book/1 — 按主键查询
+GET {{baseUrl}}/orm/book/1
+
+### GET /orm/book/999 — id 不存在 → 404
+GET {{baseUrl}}/orm/book/999
+
+# ─── 按作者模糊查询 ─────────────────
+# 笔记：[[02 FastAPI进阶]] → 四、数据库操作 → 4.2 查询条件 → 模糊查询
+# like() + % 通配符
+
+### GET /orm/book/search/曹雪芹 — 模糊查询
+GET {{baseUrl}}/orm/book/search/曹雪芹
+
+# ─── 聚合统计 ──────────────────────────
+# 笔记：[[02 FastAPI进阶]] → 四、数据库操作 → 4.3 聚合查询
+# func.count / func.avg / func.max / func.min / func.sum
+
+### GET /orm/book/stats/count — 总数 + 均价
+GET {{baseUrl}}/orm/book/stats/count
+
+# ─── 新增图书 ──────────────────────────
+# 笔记：[[02 FastAPI进阶]] → 四、数据库操作 → 4.5 新增数据
+# 步骤：new ORM obj → add() → commit() → refresh()
+
+### POST /orm/book/add — 新增一本
+POST {{baseUrl}}/orm/book/add
+Content-Type: application/json
+
+{
+  "bookname": "红楼梦",
+  "author": "曹雪芹",
+  "price": 88.0
+}
+
+### POST /orm/book/add — 缺字段 → 422
+POST {{baseUrl}}/orm/book/add
+Content-Type: application/json
+
+{
+  "bookname": "只有书名"
+}
+
+# ─── 更新图书 ──────────────────────────
+# 笔记：[[02 FastAPI进阶]] → 四、数据库操作 → 4.6 更新数据
+# 步骤：get 查询 → 属性重新赋值 → commit
+
+### PUT /orm/book/update/1 — 部分更新（只改价格）
+PUT {{baseUrl}}/orm/book/update/1
+Content-Type: application/json
+
+{
+  "price": 99.9
+}
+
+### PUT /orm/book/price/1?price=66.6 — update() 语句方式改价
+PUT {{baseUrl}}/orm/book/price/1?price=66.6
+
+### PUT /orm/book/update/999 — id 不存在 → 404
+PUT {{baseUrl}}/orm/book/update/999
+Content-Type: application/json
+
+{
+  "price": 50.0
+}
+
+# ─── 删除图书 ──────────────────────────
+# 笔记：[[02 FastAPI进阶]] → 四、数据库操作 → 4.7 删除数据
+# 步骤：get 查询 → delete() → commit
+
+### DELETE /orm/book/delete/1 — 删除一本
+DELETE {{baseUrl}}/orm/book/delete/1
+
+### DELETE /orm/book/delete/999 — id 不存在 → 404
+DELETE {{baseUrl}}/orm/book/delete/999
